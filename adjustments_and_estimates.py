@@ -83,34 +83,43 @@ def _(combined, pl):
         .agg(
             # Number of altered temp. observations
             pl.col('temp_f').is_not_null().sum().alias('n_obs_altered'),
+            # Number of raw temp. observations
+            pl.col('temp_f_raw').is_not_null().sum().alias('n_obs_raw'),
+            # Number of dropped raw temp. observations
+            pl.col('temp_f_raw').filter(pl.col('temp_f').is_null()).count().alias('n_dropped_obs'),
             # Number of temp. observations that exist is both raw and altered data
             pl.col('adjustment').count().alias('n_obs_both'),
             # Number of temp. observations that exist is both raw and altered data that have been altered
-            pl.col('adjustment').filter(pl.col('adjustment') != 0).count().alias('n_adjs'),
+            pl.col('adjustment').filter(pl.col('adjustment') != 0).count().alias('n_adjusted_obs'),
             # Number of temp. observations that have been estimated
-            pl.col('temp_f').filter((pl.col('dmflag') == 'E') & (pl.col('temp_f').is_not_null())).count().alias('n_ests'),
+            pl.col('temp_f').filter((pl.col('dmflag') == 'E') & (pl.col('temp_f').is_not_null())).count().alias('n_estimated_obs'),
             # Average adjusment
-            pl.col('adjustment').filter(pl.col('adjustment') != 0).mean().alias('avg_adj'),
-            # Average raw temp. of obs. that were estimated
-            pl.col('temp_f').filter((pl.col('dmflag') == 'E') & (pl.col('temp_f').is_not_null())).mean().alias('avg_est'),
+            pl.col('adjustment').filter(pl.col('adjustment') != 0).mean().alias('avg_adjustment'),
+            # Average temp. of obs. that were estimated
+            pl.col('temp_f').filter((pl.col('dmflag') == 'E') & (pl.col('temp_f').is_not_null())).mean().alias('avg_estimate'),
             # Average raw temp. of obs. that were not estimated
-            pl.col('temp_f_raw').filter((pl.col('dmflag') != 'E') | pl.col('dmflag').is_null()).mean().alias('avg_not_est_raw'),
+            pl.col('temp_f_raw').filter((pl.col('dmflag') != 'E') | pl.col('dmflag').is_null()).mean().alias('avg_non_estimated_raw'),
         )
         .with_columns(
-            (100 * pl.col('n_adjs') / pl.col('n_obs_both')).alias('percent_adjusted'),
-            (pl.col('avg_est') - pl.col('avg_not_est_raw')).alias('avg_est_delta'),
+            (100 * pl.col('n_adjusted_obs') / pl.col('n_obs_raw')).alias('percent_adjusted'),
+            (100 * (pl.col('n_adjusted_obs') + pl.col('n_dropped_obs'))/ pl.col('n_obs_raw')).alias('percent_adjusted_or_dropped'),
+            (pl.col('avg_estimate') - pl.col('avg_non_estimated_raw')).alias('avg_estimate_delta'),
         )
     )
-    stats
     return (stats,)
 
 
 @app.cell
-def _(plt):
-    def make_chart(df, line_field, bar_field, title):
+def _(pl, plt):
+    def make_chart(df: pl.DataFrame, line_field: str , bar_field: str, title: str):
         left_y_axis_color = 'blue'
         right_y_axis_color = 'green'
 
+        if line_field.startswith('percent'):
+            y_min = 0
+        else:
+            y_min = None
+        
         # Create the figure and axis
         fig, ax = plt.subplots(figsize=(9, 5))
 
@@ -120,6 +129,7 @@ def _(plt):
         plt.xlabel('Year')
         plt.ylabel(line_field, color=left_y_axis_color)
         plt.tick_params(axis='y', labelcolor=left_y_axis_color)
+        ax.set_ylim(y_min, None)  # Set left y-axis minimum to 0
         plt.title(title)
         plt.grid(True)
 
@@ -144,19 +154,30 @@ def _(plt):
 
 @app.cell
 def _(make_chart, stats):
-    make_chart(stats, 'percent_adjusted', 'n_obs_both', "When raw data already existed, here's what percent were adjusted")
+    make_chart(stats, 'percent_adjusted_or_dropped', 'n_obs_raw', "When raw data already existed, here's how frequently it was adjusted or dropped")
     return
 
 
 @app.cell
 def _(make_chart, stats):
-    make_chart(stats, 'avg_adj', 'n_obs_both', "When raw data already existed, here's how it was adjusted")
+    make_chart(stats, 'percent_adjusted', 'n_obs_raw', "When raw data already existed, here's how frequently it was adjusted")
     return
 
 
 @app.cell
 def _(make_chart, stats):
-    make_chart(stats, 'avg_est_delta', 'n_ests', "When raw data did not exist, here's how it was estimated\n(relative to the average of existing raw data)")
+    make_chart(stats, 'avg_adjustment', 'n_obs_raw', "When raw data already existed, here's how it was adjusted")
+    return
+
+
+@app.cell
+def _(make_chart, stats):
+    make_chart(stats, 'avg_estimate_delta', 'n_estimated_obs', "When raw data did not exist, here's how it was estimated\n(relative to the average of existing raw data)")
+    return
+
+
+@app.cell
+def _():
     return
 
 
