@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "altair>=5.5.0",
     "marimo>=0.13.2",
     "matplotlib>=3.10.1",
     "polars==1.27.1",
