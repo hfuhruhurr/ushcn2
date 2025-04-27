@@ -6,7 +6,9 @@ To procure a primary source of the Vostok Ice Core data in order to replicate th
 
 ## Primary Source Data
 
-I had a dickens of a time finding the primary source data but found the data in [Curran Kelleher's GitHub Gist](https://gist.github.com/curran/beb3cdbbdf735a7d8bd2c8928280582b).
+The web page of [the primary source](https://cdiac.ess-dive.lbl.gov) is no longer active...met with a "Service Unavailable" message from the ESS-DIVE team.
+
+But I found a copy of the data in [Curran Kelleher's GitHub Gist](https://gist.github.com/curran/beb3cdbbdf735a7d8bd2c8928280582b).
 
 ## Curran's [README.md](https://gist.github.com/curran/beb3cdbbdf735a7d8bd2c8928280582b#file-readme-md), as of 4/27/2025:
 These datasets were downloaded from:
