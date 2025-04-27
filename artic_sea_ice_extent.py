@@ -22,7 +22,7 @@ def _():
 
 @app.cell
 def _():
-    input_file = 'osisaf_nh_sie_daily.txt'
+    input_file = 'source-data/osisaf-sea-ice-index/osisaf_nh_sie_daily.txt'
 
     # Read the data from the file
     data = []

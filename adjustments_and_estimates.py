@@ -3,10 +3,7 @@
 import marimo
 
 __generated_with = "0.13.2"
-app = marimo.App(
-    width="medium",
-    layout_file="layouts/adjustments_and_estimates.slides.json",
-)
+app = marimo.App(width="medium")
 
 
 @app.cell
@@ -19,7 +16,7 @@ def _():
 
 @app.cell
 def _(pl):
-    df = pl.read_parquet('ushcn_monthly_data.parquet')
+    df = pl.read_parquet('source-data/ushcn/ushcn_monthly_data.parquet')
     return (df,)
 
 
@@ -119,7 +116,7 @@ def _(pl, plt):
             y_min = 0
         else:
             y_min = None
-        
+
         # Create the figure and axis
         fig, ax = plt.subplots(figsize=(9, 5))
 
