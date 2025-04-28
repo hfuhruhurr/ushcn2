@@ -17,44 +17,102 @@ def _():
     import marimo as mo
     import polars as pl
     import altair as alt
-    return alt, mo, pl
+    import ftplib
+    return alt, ftplib, mo, pl
 
 
 @app.cell
 def _():
-    input_file = 'source-data/osisaf-sea-ice-index/osisaf_nh_sie_daily.txt'
-
-    # Read the data from the file
-    data = []
-    with open(input_file, 'r') as file:
-        for line in file:
-            if line[0] != "#":
-                # Split the line by whitespace and strip any extra spaces
-                parts = line.strip().split()
-
-                # Convert to appropriate types and handle missing values
-                decimal_date = float(parts[0]) if len(parts) > 0 else None
-                year = int(parts[1]) if len(parts) > 1 else None
-                month = int(parts[2]) if len(parts) > 2 else None
-                day = int(parts[3]) if len(parts) > 3 else None
-                sea_ice_extent = int(parts[4]) if len(parts) > 4 else None
-                method = parts[5] if len(parts) > 5 else None
-
-                # Append the processed data to the list
-                if len(parts) > 0:
-                    data.append([decimal_date, year, month, day, sea_ice_extent, method])
-    return (data,)
+    source_folder = 'source-data/osisaf-sea-ice-index/'
+    return (source_folder,)
 
 
 @app.cell
-def _(data, pl):
+def _(ftplib, source_folder):
+    def fetch_osisaf_sie_daily_file():
+        ftp = ftplib.FTP('osisaf.met.no')
+        ftp.login()  # Anonymous login
+        ftp.cwd('/prod_test/ice/index/v2p2/nh/')
+        with open(f'{source_folder}osisaf_nh_sie_daily.txt', 'wb') as f:
+            ftp.retrbinary('RETR osisaf_nh_sie_daily.txt', f.write)
+        ftp.quit()
+    return
+
+
+@app.cell
+def _(pl):
+    def make_osisaf_df_from_source(source_path: str) -> pl.DataFrame:
+        """
+        Create a Polars DataFrame from an OSISAF sea ice data file, including creation date.
+    
+        Args:
+            source_path (str): Path to OSISAF data file (e.g., 'osisaf_nh_sie_daily.txt').
+    
+        Returns:
+            pl.DataFrame: DataFrame with columns [region, metric, frac_year, year, month, day, area, source, creation_date].
+    
+        Raises:
+            FileNotFoundError: If source_path does not exist.
+            ValueError: If file name format is invalid.
+        """
+        try:
+            # Extract region, metric, and frequency from file name of source path
+            file_name = source_path.split('/')[-1]
+            parts = file_name.split('_')
+            if len(parts) < 4:
+                raise ValueError("Invalid file name format")
+            agency, region, metric, freq = parts
+            freq = freq.split('.')[0]
+
+            # Initialize creation date and data list
+            creation_date = None
+            data = []
+
+            # Read file to extract the data
+            with open(source_path, 'r') as file:
+                for line in file:
+                    if line.strip() and line[0] == "#":
+                        # Extract creation date from comment
+                        if "Creation date:" in line:
+                            creation_date = line.split("Creation date:")[1].strip()
+                    elif line.strip():
+                        parts = line.strip().split()
+                        data.append([
+                            creation_date,
+                            region,
+                            metric,
+                            freq,
+                            float(parts[0]) if len(parts) > 0 and parts[0] else None,
+                            int(parts[1]) if len(parts) > 1 and parts[1] else None,
+                            int(parts[2]) if len(parts) > 2 and parts[2] else None,
+                            int(parts[3]) if len(parts) > 3 and parts[3] else None,
+                            int(parts[4]) if len(parts) > 4 and parts[4] else None,
+                            parts[5] if len(parts) > 5 else None,
+                        ])
+
+            return pl.DataFrame(
+                data,
+                schema=['creation_date', 'region', 'metric', 'freq', 'frac_year', 'year', 'month', 'day', 'area', 'source'],
+                orient='row'
+            ).with_columns(
+                pl.col('creation_date').str.to_datetime(format="%Y-%m-%d %H:%M:%S%.f", strict=False).cast(pl.Date),
+                pl.col('area').replace(-999, None),
+            )
+
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {source_path}")
+        except ValueError as e:
+            raise ValueError(f"Error processing file: {str(e)}")
+    return (make_osisaf_df_from_source,)
+
+
+@app.cell
+def _(make_osisaf_df_from_source, pl, source_folder):
+    input_file = f'{source_folder}osisaf_nh_sie_daily.txt'
     sie = (
-        pl.DataFrame(data, schema=['decimal_date', 'year', 'month', 'day', 'sea_ice_extent', 'method'], orient='row')
-        .with_columns(
-            pl.when(pl.col('sea_ice_extent') == -999)
-            .then(None)  # Replace -999 with NULL
-            .otherwise(pl.col('sea_ice_extent'))  # Keep original value if not -999
-            .alias('sea_ice_extent')  # Assign back to column
+        make_osisaf_df_from_source(input_file)
+        .filter(
+            pl.col('metric') == 'sie'
         )
     )
     sie
@@ -63,21 +121,31 @@ def _(data, pl):
 
 @app.cell
 def _(sie):
-    sie['method'].value_counts()
+    sie['source'].value_counts().sort(by='count', descending=True)
     return
 
 
 @app.cell
-def _(alt, pl, sie):
-    sie_4_17 = sie.filter(pl.col('month') == 4, pl.col('day') == 17)
+def _(mo):
+    date_picker = mo.ui.date()
+    date_picker
+    return (date_picker,)
+
+
+@app.cell
+def _(alt, date_picker, pl, sie):
+    month = date_picker.value.month
+    day = date_picker.value.day
+
+    sie_specific_date = sie.filter(pl.col('month') == month, pl.col('day') == day)
 
     # To allow for missing years to be noticeable on chart
-    min_year = sie_4_17['year'].min()
-    max_year = sie_4_17['year'].max()
+    min_year = sie_specific_date['year'].min()
+    max_year = sie_specific_date['year'].max()
     all_years = range(min_year, max_year + 1)
 
     (
-        sie_4_17
+        sie_specific_date
         .plot.bar(
             color=alt.value('red'),
             opacity=alt.value(0.7),
@@ -87,19 +155,14 @@ def _(alt, pl, sie):
                 title='Year'
             ),
             y=alt.Y(
-                'sea_ice_extent',
+                'area',
                 title='SIE (km²)'       
             )
         )
         .properties(
-            title='April 17th Artic Sea Ice Extent'
+            title=f'Artic Sea Ice Extent (Date: {month}/{day})'
         )
     )
-    return
-
-
-@app.cell
-def _():
     return
 
 
