@@ -31,7 +31,7 @@ def _(pl):
             )
             .with_columns(
                 pl.col('value').alias('temp_c'),
-                (pl.col('value') * 9/5 + 32).alias('temp_f')
+                (pl.col('value') * 9/5 + 32).alias('temp')
             )
             .drop(['element', 'dataset_type', 'value'])
         )
@@ -46,26 +46,41 @@ def _(clean_source, df):
 
 @app.cell
 def _(clean_source, df):
-    altered = clean_source(df, 'FLs.52j')
-    return (altered,)
+    tob = clean_source(df, 'tob')
+    return (tob,)
 
 
 @app.cell
-def _(altered, pl, raw):
+def _(clean_source, df):
+    pha = clean_source(df, 'FLs.52j')
+    return (pha,)
+
+
+@app.cell
+def _(pha, pl, raw, tob):
     combined = (
-        altered
+        pha
         .join(
             raw,
             on=['coop_id', 'year', 'month'],
             how='left',
             suffix='_raw'
         )
+        .join(
+            tob,
+            on=['coop_id', 'year', 'month'],
+            how='left',
+            suffix='_tob'
+        )
         .sort(['year', 'month', 'coop_id'])
-        .select(['year', 'month', 'coop_id', 'temp_f', 'dmflag', 'temp_f_raw', 'dmflag_raw'])
+        .select(['year', 'month', 'coop_id', 'temp', 'dmflag', 'temp_raw', 'dmflag_raw', 'temp_tob', 'dmflag_tob'])
         .with_columns(
-            (pl.col('temp_f') - pl.col('temp_f_raw')).alias('adjustment')
+            (pl.col('temp_tob') - pl.col('temp_raw')).alias('adjustment_tob'),
+            (pl.col('temp') - pl.col('temp_tob')).alias('adjustment_pha'),
+            (pl.col('temp') - pl.col('temp_raw')).alias('adjustment'),
         )
     )
+    combined
     return (combined,)
 
 
@@ -78,32 +93,59 @@ def _(combined, pl):
         # )
         .group_by('year')
         .agg(
-            # Number of altered temp. observations
-            pl.col('temp_f').is_not_null().sum().alias('n_obs_altered'),
-            # Number of raw temp. observations
-            pl.col('temp_f_raw').is_not_null().sum().alias('n_obs_raw'),
-            # Number of dropped raw temp. observations
-            pl.col('temp_f_raw').filter(pl.col('temp_f').is_null()).count().alias('n_dropped_obs'),
-            # Number of temp. observations that exist is both raw and altered data
-            pl.col('adjustment').count().alias('n_obs_both'),
-            # Number of temp. observations that exist is both raw and altered data that have been altered
-            pl.col('adjustment').filter(pl.col('adjustment') != 0).count().alias('n_adjusted_obs'),
+            # Number of observations
+            pl.col('temp').is_not_null().sum().alias('n_obs_pha'),
+            pl.col('temp_tob').is_not_null().sum().alias('n_obs_tob'),
+            pl.col('temp_raw').is_not_null().sum().alias('n_obs_raw'),
+        
+            # Number of dropped observations
+            pl.col('temp_raw').filter(pl.col('temp_tob').is_null()).count().alias('n_tob_dropped_obs'),
+            pl.col('temp_tob').filter(pl.col('temp').is_null()).count().alias('n_pha_dropped_obs'),
+        
+            # # Number of temp. observations that exist is both raw and altered data
+            # pl.col('adjustment_tob').count().alias('n_obs_fboth'),
+        
+            # # Number of temp. observations that exist is both raw and altered data that have been altered
+            # pl.col('adjustment').filter(pl.col('adjustment') != 0).count().alias('n_adjusted_obs'),
+        
             # Number of temp. observations that have been estimated
-            pl.col('temp_f').filter((pl.col('dmflag') == 'E') & (pl.col('temp_f').is_not_null())).count().alias('n_estimated_obs'),
+            pl.col('temp').filter(
+                (pl.col('dmflag') == 'E') & (pl.col('temp').is_not_null())
+            ).count().alias('n_obs_estimated'),
+
+            # Number of obs that have been adjusted
+            pl.col('temp_tob').filter(pl.col('adjustment_tob') != 0).count().alias('n_tob_adjusted'),
+            pl.col('temp').filter(pl.col('adjustment_pha') != 0).count().alias('n_pha_adjusted'),
+            pl.col('temp').filter(pl.col('adjustment') != 0).count().alias('n_adjusted'),
+        
             # Average adjusment
+            pl.col('adjustment_tob').filter(pl.col('adjustment_tob') != 0).mean().alias('avg_tob_adjustment'),
+            pl.col('adjustment_pha').filter(pl.col('adjustment_pha') != 0).mean().alias('avg_pha_adjustment'),
             pl.col('adjustment').filter(pl.col('adjustment') != 0).mean().alias('avg_adjustment'),
+        
             # Average temp. of obs. that were estimated
-            pl.col('temp_f').filter((pl.col('dmflag') == 'E') & (pl.col('temp_f').is_not_null())).mean().alias('avg_estimate'),
+            pl.col('temp').filter(pl.col('dmflag') == 'E').mean().alias('avg_estimate'),
+        
             # Average raw temp. of obs. that were not estimated
-            pl.col('temp_f_raw').filter((pl.col('dmflag') != 'E') | pl.col('dmflag').is_null()).mean().alias('avg_non_estimated_raw'),
+            pl.col('temp_raw').filter(
+                (pl.col('dmflag') != 'E') 
+                | pl.col('dmflag').is_null()
+            ).mean().alias('avg_non_estimated_raw'),
         )
         .with_columns(
-            (100 * pl.col('n_adjusted_obs') / pl.col('n_obs_raw')).alias('percent_adjusted'),
-            (100 * (pl.col('n_adjusted_obs') + pl.col('n_dropped_obs'))/ pl.col('n_obs_raw')).alias('percent_adjusted_or_dropped'),
+            (100 * pl.col('n_tob_adjusted') / pl.col('n_obs_raw')).alias('percent_tob_adjusted'),
+            (100 * pl.col('n_pha_adjusted') / pl.col('n_obs_tob')).alias('percent_pha_adjusted'),
+            (100 * pl.col('n_adjusted') / pl.col('n_obs_raw')).alias('percent_adjusted'),
             (pl.col('avg_estimate') - pl.col('avg_non_estimated_raw')).alias('avg_estimate_delta'),
         )
     )
     return (stats,)
+
+
+@app.cell
+def _(stats):
+    stats
+    return
 
 
 @app.cell
@@ -151,12 +193,6 @@ def _(pl, plt):
 
 @app.cell
 def _(make_chart, stats):
-    make_chart(stats, 'percent_adjusted_or_dropped', 'n_obs_raw', "When raw data already existed, here's how frequently it was adjusted or dropped")
-    return
-
-
-@app.cell
-def _(make_chart, stats):
     make_chart(stats, 'percent_adjusted', 'n_obs_raw', "When raw data already existed, here's how frequently it was adjusted")
     return
 
@@ -169,7 +205,13 @@ def _(make_chart, stats):
 
 @app.cell
 def _(make_chart, stats):
-    make_chart(stats, 'avg_estimate_delta', 'n_estimated_obs', "When raw data did not exist, here's how it was estimated\n(relative to the average of existing raw data)")
+    make_chart(stats, 'avg_tob_adjustment', 'n_obs_raw', "When raw data already existed, here's how it was adjusted for TOD Bias")
+    return
+
+
+@app.cell
+def _(make_chart, stats):
+    make_chart(stats, 'avg_estimate_delta', 'n_obs_estimated', "When raw data did not exist, here's how it was estimated\n(relative to the average of existing raw data)")
     return
 
 
